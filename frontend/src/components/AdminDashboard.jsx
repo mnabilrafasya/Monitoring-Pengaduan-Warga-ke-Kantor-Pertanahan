@@ -1,7 +1,10 @@
 // frontend/src/components/AdminDashboard.jsx
 import React, { useState, useEffect } from 'react';
-import { Search, Upload, FileText, CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, Eye, Edit, Trash2, X } from 'lucide-react';
+import { Search, Upload, FileText, CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, Eye, Edit, Trash2, X, Download } from 'lucide-react';
 import { complaintAPI } from '../services/api';
+import { useDebounce } from '../hooks/useDebounce';
+import { useToast, ToastContainer } from './Toast';
+import ConfirmDialog from './ConfirmDialog';
 
 const AdminDashboard = ({ user, onLogout }) => {
   const [complaints, setComplaints] = useState([]);
@@ -10,30 +13,36 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [uploadFile, setUploadFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [selectedComplaint, setSelectedComplaint] = useState(null);
   const [editMode, setEditMode] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, onConfirm: null, title: '', message: '' });
+
+  const { toasts, addToast, removeToast } = useToast();
+  const debouncedSearch = useDebounce(searchTerm, 500);
 
   useEffect(() => {
     fetchComplaints();
     fetchStatistics();
-  }, [currentPage, searchTerm, statusFilter]);
+  }, [currentPage, debouncedSearch, statusFilter, itemsPerPage]);
 
   const fetchComplaints = async () => {
     setLoading(true);
     try {
       const response = await complaintAPI.getAll({
         page: currentPage,
-        limit: 10,
-        search: searchTerm,
+        limit: itemsPerPage,
+        search: debouncedSearch,
         status: statusFilter
       });
       setComplaints(response.data.data);
       setTotalPages(response.data.pagination.totalPages);
     } catch (error) {
       console.error('Error fetching complaints:', error);
+      addToast('Gagal memuat data', 'error');
     } finally {
       setLoading(false);
     }
@@ -53,7 +62,11 @@ const AdminDashboard = ({ user, onLogout }) => {
     if (file) {
       const validTypes = ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv'];
       if (!validTypes.includes(file.type)) {
-        alert('Tipe file tidak valid. Gunakan .xlsx, .xls, atau .csv');
+        addToast('Tipe file tidak valid. Gunakan .xlsx, .xls, atau .csv', 'error');
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        addToast('Ukuran file maksimal 10MB', 'error');
         return;
       }
       setUploadFile(file);
@@ -62,47 +75,57 @@ const AdminDashboard = ({ user, onLogout }) => {
 
   const handleUpload = async () => {
     if (!uploadFile) {
-      alert('Pilih file terlebih dahulu');
+      addToast('Pilih file terlebih dahulu', 'error');
       return;
     }
 
     setUploading(true);
     try {
       const response = await complaintAPI.uploadExcel(uploadFile);
-      alert(`Upload berhasil!\nTotal: ${response.data.summary.total}\nDitambahkan: ${response.data.summary.inserted}\nDiupdate: ${response.data.summary.updated}`);
+      addToast(
+        `Upload berhasil! Total: ${response.data.summary.total}, Ditambahkan: ${response.data.summary.inserted}, Diupdate: ${response.data.summary.updated}`,
+        'success',
+        5000
+      );
       setUploadFile(null);
+      document.getElementById('file-input').value = '';
       fetchComplaints();
       fetchStatistics();
     } catch (error) {
-      alert(error.response?.data?.message || 'Gagal upload file');
+      addToast(error.response?.data?.message || 'Gagal upload file', 'error');
     } finally {
       setUploading(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Yakin ingin menghapus data ini?')) return;
-
-    try {
-      await complaintAPI.delete(id);
-      alert('Data berhasil dihapus');
-      fetchComplaints();
-      fetchStatistics();
-    } catch (error) {
-      alert('Gagal menghapus data');
-    }
+  const handleDelete = (id) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Hapus Data',
+      message: 'Apakah Anda yakin ingin menghapus data ini? Tindakan ini tidak dapat dibatalkan.',
+      onConfirm: async () => {
+        try {
+          await complaintAPI.delete(id);
+          addToast('Data berhasil dihapus', 'success');
+          fetchComplaints();
+          fetchStatistics();
+        } catch (error) {
+          addToast('Gagal menghapus data', 'error');
+        }
+      }
+    });
   };
 
   const handleUpdate = async () => {
     try {
       await complaintAPI.update(selectedComplaint.id, selectedComplaint);
-      alert('Data berhasil diupdate');
+      addToast('Data berhasil diupdate', 'success');
       setEditMode(false);
       setSelectedComplaint(null);
       fetchComplaints();
       fetchStatistics();
     } catch (error) {
-      alert('Gagal update data');
+      addToast('Gagal update data', 'error');
     }
   };
 
@@ -115,14 +138,51 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const exportToCSV = () => {
+    const headers = ['Kode Unit', 'Nama', 'Telepon', 'Alamat', 'Keperluan', 'Waktu Kedatangan', 'Petugas', 'Status', 'Catatan'];
+    const rows = complaints.map(c => [
+      c.unit_code,
+      c.nama_lengkap,
+      c.nomor_telepon || '',
+      c.alamat || '',
+      c.keperluan,
+      c.waktu_kedatangan,
+      c.petugas || '',
+      c.status,
+      c.catatan || ''
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `pengaduan_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    
+    addToast('Data berhasil diexport', 'success');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog({ ...confirmDialog, isOpen: false })}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+      />
+
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm">
+      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-green-600 rounded-lg">
+              <div className="p-2 bg-gradient-to-br from-green-600 to-green-700 rounded-lg shadow-md">
                 <FileText className="w-6 h-6 text-white" />
               </div>
               <div>
@@ -132,7 +192,7 @@ const AdminDashboard = ({ user, onLogout }) => {
             </div>
             <button
               onClick={onLogout}
-              className="px-4 py-2 text-gray-600 hover:text-gray-800 font-medium"
+              className="px-5 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 font-medium rounded-lg transition-colors"
             >
               Logout
             </button>
@@ -142,50 +202,56 @@ const AdminDashboard = ({ user, onLogout }) => {
 
       <div className="container mx-auto px-4 py-8">
         {/* Statistics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-shadow">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Total Pengaduan</p>
                 <p className="text-3xl font-bold text-gray-800">{statistics.total}</p>
+                <p className="text-xs text-gray-500 mt-1">Semua data</p>
               </div>
-              <div className="p-3 bg-blue-100 rounded-lg">
+              <div className="p-4 bg-blue-100 rounded-xl">
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-shadow">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Selesai</p>
                 <p className="text-3xl font-bold text-green-600">{statistics.selesai}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {statistics.total > 0 ? Math.round((statistics.selesai / statistics.total) * 100) : 0}% dari total
+                </p>
               </div>
-              <div className="p-3 bg-green-100 rounded-lg">
+              <div className="p-4 bg-green-100 rounded-xl">
                 <CheckCircle className="w-8 h-8 text-green-600" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-shadow">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Proses</p>
                 <p className="text-3xl font-bold text-yellow-600">{statistics.proses}</p>
+                <p className="text-xs text-gray-500 mt-1">Sedang ditangani</p>
               </div>
-              <div className="p-3 bg-yellow-100 rounded-lg">
+              <div className="p-4 bg-yellow-100 rounded-xl">
                 <Clock className="w-8 h-8 text-yellow-600" />
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 hover:shadow-lg transition-shadow">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Pending</p>
                 <p className="text-3xl font-bold text-red-600">{statistics.pending}</p>
+                <p className="text-xs text-gray-500 mt-1">Menunggu tindakan</p>
               </div>
-              <div className="p-3 bg-red-100 rounded-lg">
+              <div className="p-4 bg-red-100 rounded-xl">
                 <AlertCircle className="w-8 h-8 text-red-600" />
               </div>
             </div>
@@ -193,52 +259,75 @@ const AdminDashboard = ({ user, onLogout }) => {
         </div>
 
         {/* Upload Section */}
-        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100 mb-8">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">Upload Data Pengaduan</h2>
-          <div className="flex gap-4 items-end">
-            <div className="flex-1">
+        <div className="bg-white rounded-xl shadow-md p-6 border border-gray-100 mb-8">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <Upload className="w-5 h-5" />
+            Upload Data Pengaduan
+          </h2>
+          <div className="flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex-1 w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Pilih File Excel/CSV
+              </label>
               <input
+                id="file-input"
                 type="file"
                 onChange={handleFileChange}
                 accept=".xlsx,.xls,.csv"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-4 py-2.5 border-2 border-gray-300 rounded-lg hover:border-green-500 transition-colors cursor-pointer file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
               />
               {uploadFile && (
-                <p className="text-sm text-gray-600 mt-2">
-                  File: {uploadFile.name} ({(uploadFile.size / 1024).toFixed(2)} KB)
-                </p>
+                <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <p className="text-sm text-green-800">
+                    <span className="font-semibold">File:</span> {uploadFile.name}
+                  </p>
+                  <p className="text-xs text-green-600 mt-1">
+                    Ukuran: {(uploadFile.size / 1024).toFixed(2)} KB
+                  </p>
+                </div>
               )}
             </div>
             <button
               onClick={handleUpload}
               disabled={!uploadFile || uploading}
-              className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg flex items-center gap-2"
+              className="px-6 py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg flex items-center gap-2 shadow-md transition-all disabled:cursor-not-allowed whitespace-nowrap"
             >
               <Upload className="w-5 h-5" />
-              {uploading ? 'Mengupload...' : 'Upload'}
+              {uploading ? 'Mengupload...' : 'Upload File'}
             </button>
           </div>
+          <p className="text-xs text-gray-500 mt-3">
+            Format: .xlsx, .xls, atau .csv. Maksimal 10MB. Baris kosong akan diabaikan otomatis.
+          </p>
         </div>
 
         {/* Data Table */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-md border border-gray-100 overflow-hidden">
           <div className="p-6 border-b border-gray-200">
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-800">Data Pengaduan</h2>
+            <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                Data Pengaduan
+              </h2>
               
-              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+              <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
                 <div className="relative flex-1 sm:flex-initial">
                   <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
-                    placeholder="Cari..."
+                    placeholder="Cari nama, kode, atau keperluan..."
                     value={searchTerm}
                     onChange={(e) => {
                       setSearchTerm(e.target.value);
                       setCurrentPage(1);
                     }}
-                    className="w-full sm:w-64 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    className="w-full sm:w-72 pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                   />
+                  {searchTerm && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+                      Searching...
+                    </span>
+                  )}
                 </div>
 
                 <select
@@ -247,13 +336,22 @@ const AdminDashboard = ({ user, onLogout }) => {
                     setStatusFilter(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none bg-white"
                 >
                   <option value="">Semua Status</option>
-                  <option value="Selesai">Selesai</option>
-                  <option value="Proses">Proses</option>
-                  <option value="Pending">Pending</option>
+                  <option value="Selesai">✓ Selesai</option>
+                  <option value="Proses">⏳ Proses</option>
+                  <option value="Pending">⚠ Pending</option>
                 </select>
+
+                <button
+                  onClick={exportToCSV}
+                  disabled={complaints.length === 0}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 font-medium rounded-lg flex items-center gap-2 transition-colors disabled:cursor-not-allowed"
+                >
+                  <Download className="w-4 h-4" />
+                  Export
+                </button>
               </div>
             </div>
           </div>
@@ -261,41 +359,61 @@ const AdminDashboard = ({ user, onLogout }) => {
           {loading ? (
             <div className="p-12 text-center">
               <div className="w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-gray-600">Memuat data...</p>
+              <p className="text-gray-600 font-medium">Memuat data...</p>
+              <p className="text-sm text-gray-500 mt-1">Mohon tunggu sebentar</p>
             </div>
           ) : complaints.length === 0 ? (
             <div className="p-12 text-center">
               <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-600">Tidak ada data</p>
+              <p className="text-gray-600 font-medium">
+                {searchTerm || statusFilter ? 'Tidak ada data yang sesuai' : 'Belum ada data'}
+              </p>
+              <p className="text-sm text-gray-500 mt-1">
+                {searchTerm || statusFilter ? 'Coba ubah filter pencarian' : 'Upload file Excel untuk menambahkan data'}
+              </p>
             </div>
           ) : (
             <>
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="bg-gray-50 border-b border-gray-200">
+                  <thead className="bg-gray-50 border-b-2 border-gray-200">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kode Unit</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nama</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Keperluan</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Petugas</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aksi</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Kode Unit</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Nama</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Keperluan</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Petugas</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {complaints.map((item) => (
-                      <tr key={item.id} className="hover:bg-gray-50">
+                      <tr key={item.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="font-mono text-sm font-semibold text-gray-900">{item.unit_code}</span>
+                          <span className="font-mono text-sm font-semibold text-gray-900 bg-gray-100 px-2 py-1 rounded">
+                            {item.unit_code}
+                          </span>
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm font-medium text-gray-900">{item.nama_lengkap}</div>
-                          <div className="text-sm text-gray-500">{item.nomor_telepon}</div>
+                          <div className="text-sm text-gray-500 flex items-center gap-1">
+                            <span>📞</span> {item.nomor_telepon || '-'}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="text-sm text-gray-900 max-w-xs truncate">{item.keperluan}</div>
+                          <div className="text-sm text-gray-900 max-w-xs truncate" title={item.keperluan}>
+                            {item.keperluan}
+                          </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-900">{item.petugas || '-'}</td>
+                        <td className="px-6 py-4 text-sm text-gray-900">
+                          {item.petugas ? (
+                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-medium">
+                              {item.petugas}
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4">
                           <span className={`px-3 py-1 text-xs font-semibold rounded-full border ${getStatusColor(item.status)}`}>
                             {item.status}
@@ -308,7 +426,8 @@ const AdminDashboard = ({ user, onLogout }) => {
                                 setSelectedComplaint(item);
                                 setEditMode(false);
                               }}
-                              className="text-blue-600 hover:text-blue-900"
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Lihat Detail"
                             >
                               <Eye className="w-4 h-4" />
                             </button>
@@ -317,13 +436,15 @@ const AdminDashboard = ({ user, onLogout }) => {
                                 setSelectedComplaint(item);
                                 setEditMode(true);
                               }}
-                              className="text-green-600 hover:text-green-900"
+                              className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                              title="Edit"
                             >
                               <Edit className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDelete(item.id)}
-                              className="text-red-600 hover:text-red-900"
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Hapus"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -335,22 +456,37 @@ const AdminDashboard = ({ user, onLogout }) => {
                 </table>
               </div>
 
-              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-                <p className="text-sm text-gray-700">
-                  Halaman {currentPage} dari {totalPages}
-                </p>
+              <div className="px-6 py-4 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <p className="text-sm text-gray-700">
+                    Halaman <span className="font-semibold">{currentPage}</span> dari <span className="font-semibold">{totalPages}</span>
+                  </p>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                  >
+                    <option value={10}>10 per halaman</option>
+                    <option value={25}>25 per halaman</option>
+                    <option value={50}>50 per halaman</option>
+                    <option value={100}>100 per halaman</option>
+                  </select>
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <ChevronRight className="w-5 h-5" />
                   </button>
@@ -363,13 +499,29 @@ const AdminDashboard = ({ user, onLogout }) => {
 
       {/* Detail/Edit Modal */}
       {selectedComplaint && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
-              <h3 className="text-xl font-semibold">
-                {editMode ? 'Edit Data' : 'Detail Pengaduan'}
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-scaleIn">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                {editMode ? (
+                  <>
+                    <Edit className="w-5 h-5 text-green-600" />
+                    Edit Data
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-5 h-5 text-blue-600" />
+                    Detail Pengaduan
+                  </>
+                )}
               </h3>
-              <button onClick={() => setSelectedComplaint(null)} className="text-gray-500 hover:text-gray-700">
+              <button 
+                onClick={() => {
+                  setSelectedComplaint(null);
+                  setEditMode(false);
+                }} 
+                className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 p-2 rounded-lg transition-colors"
+              >
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -384,7 +536,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                         type="text"
                         value={selectedComplaint.nama_lengkap}
                         onChange={(e) => setSelectedComplaint({...selectedComplaint, nama_lengkap: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                       />
                     </div>
                     <div>
@@ -393,7 +545,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                         type="text"
                         value={selectedComplaint.nomor_telepon}
                         onChange={(e) => setSelectedComplaint({...selectedComplaint, nomor_telepon: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                       />
                     </div>
                   </div>
@@ -404,7 +556,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                       value={selectedComplaint.keperluan}
                       onChange={(e) => setSelectedComplaint({...selectedComplaint, keperluan: e.target.value})}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                     />
                   </div>
 
@@ -415,7 +567,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                         type="text"
                         value={selectedComplaint.petugas}
                         onChange={(e) => setSelectedComplaint({...selectedComplaint, petugas: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                       />
                     </div>
                     <div>
@@ -423,7 +575,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                       <select
                         value={selectedComplaint.status}
                         onChange={(e) => setSelectedComplaint({...selectedComplaint, status: e.target.value})}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                       >
                         <option value="Pending">Pending</option>
                         <option value="Proses">Proses</option>
@@ -438,20 +590,21 @@ const AdminDashboard = ({ user, onLogout }) => {
                       value={selectedComplaint.catatan}
                       onChange={(e) => setSelectedComplaint({...selectedComplaint, catatan: e.target.value})}
                       rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                      placeholder="Tambahkan catatan atau update terkini..."
                     />
                   </div>
 
                   <div className="flex gap-3 pt-4">
                     <button
                       onClick={handleUpdate}
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg"
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition-colors"
                     >
-                      Simpan
+                      Simpan Perubahan
                     </button>
                     <button
                       onClick={() => setEditMode(false)}
-                      className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-lg"
+                      className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-3 px-4 rounded-lg transition-colors"
                     >
                       Batal
                     </button>
@@ -460,58 +613,58 @@ const AdminDashboard = ({ user, onLogout }) => {
               ) : (
                 <>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Kode Unit</p>
-                      <p className="font-semibold">{selectedComplaint.unit_code}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Kode Unit</p>
+                      <p className="font-semibold text-lg">{selectedComplaint.unit_code}</p>
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-500">No Berkas</p>
-                      <p className="font-semibold">{selectedComplaint.nomor_berkas || '-'}</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">No Berkas</p>
+                      <p className="font-semibold text-lg">{selectedComplaint.nomor_berkas || '-'}</p>
                     </div>
                   </div>
 
-                  <div>
-                    <p className="text-sm text-gray-500">Nama</p>
-                    <p className="font-semibold">{selectedComplaint.nama_lengkap}</p>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500 mb-1">Nama Lengkap</p>
+                    <p className="font-semibold text-lg">{selectedComplaint.nama_lengkap}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Telepon</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Telepon</p>
                       <p className="font-semibold">{selectedComplaint.nomor_telepon || '-'}</p>
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Alamat</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Alamat</p>
                       <p className="font-semibold">{selectedComplaint.alamat}</p>
                     </div>
                   </div>
 
-                  <div>
-                    <p className="text-sm text-gray-500">Keperluan</p>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500 mb-1">Keperluan</p>
                     <p className="font-semibold">{selectedComplaint.keperluan}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Waktu Kedatangan</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Waktu Kedatangan</p>
                       <p className="font-semibold">{selectedComplaint.waktu_kedatangan}</p>
                     </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Petugas</p>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Petugas</p>
                       <p className="font-semibold">{selectedComplaint.petugas || '-'}</p>
                     </div>
                   </div>
 
-                  <div>
-                    <p className="text-sm text-gray-500">Status</p>
-                    <span className={`inline-block px-3 py-1 text-sm font-semibold rounded-full border ${getStatusColor(selectedComplaint.status)} mt-1`}>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500 mb-2">Status</p>
+                    <span className={`inline-block px-4 py-2 text-sm font-semibold rounded-full border ${getStatusColor(selectedComplaint.status)}`}>
                       {selectedComplaint.status}
                     </span>
                   </div>
 
-                  <div>
-                    <p className="text-sm text-gray-500">Catatan</p>
-                    <p className="font-semibold">{selectedComplaint.catatan || '-'}</p>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500 mb-2">Catatan</p>
+                    <p className="font-semibold text-gray-800">{selectedComplaint.catatan || '-'}</p>
                   </div>
                 </>
               )}
