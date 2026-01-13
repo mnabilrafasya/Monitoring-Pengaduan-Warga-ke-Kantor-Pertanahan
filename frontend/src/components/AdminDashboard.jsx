@@ -1,6 +1,6 @@
 // frontend/src/components/AdminDashboard.jsx
 import React, { useState, useEffect } from 'react';
-import { Search, Upload, FileText, CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, Eye, Edit, Trash2, X, Download } from 'lucide-react';
+import { Search, Upload, FileText, CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, Eye, Edit, Trash2, X, Download, Plus } from 'lucide-react';
 import { complaintAPI } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast, ToastContainer } from './Toast';
@@ -19,6 +19,24 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [uploading, setUploading] = useState(false);
   const [selectedComplaint, setSelectedComplaint] = useState(null);
   const [editMode, setEditMode] = useState(false);
+  
+  // ==================== PERUBAHAN: State untuk Create Mode ====================
+  const [createMode, setCreateMode] = useState(false);
+  const [newComplaint, setNewComplaint] = useState({
+    nama_lengkap: '',
+    nomor_telepon: '',
+    email: '',
+    nik: '',
+    nomor_berkas: '',
+    alamat: '',
+    keperluan: '',
+    waktu_kedatangan: new Date().toISOString().slice(0, 16),
+    petugas: '',
+    status: 'Pending',
+    catatan: ''
+  });
+  // ==================== END PERUBAHAN ====================
+
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, onConfirm: null, title: '', message: '' });
 
   const { toasts, addToast, removeToast } = useToast();
@@ -98,6 +116,46 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
+  // ==================== PERUBAHAN: Handler Create Manual ====================
+  const handleCreate = async () => {
+    // Validasi
+    if (!newComplaint.nama_lengkap.trim()) {
+      addToast('Nama lengkap wajib diisi', 'error');
+      return;
+    }
+
+    try {
+      const response = await complaintAPI.create(newComplaint);
+      addToast(
+        `Data berhasil ditambahkan dengan kode unit: ${response.data.data.unit_code}`,
+        'success',
+        5000
+      );
+      
+      // Reset form
+      setNewComplaint({
+        nama_lengkap: '',
+        nomor_telepon: '',
+        email: '',
+        nik: '',
+        nomor_berkas: '',
+        alamat: '',
+        keperluan: '',
+        waktu_kedatangan: new Date().toISOString().slice(0, 16),
+        petugas: '',
+        status: 'Pending',
+        catatan: ''
+      });
+      
+      setCreateMode(false);
+      fetchComplaints();
+      fetchStatistics();
+    } catch (error) {
+      addToast(error.response?.data?.message || 'Gagal menambahkan data', 'error');
+    }
+  };
+  // ==================== END PERUBAHAN ====================
+
   const handleDelete = (id) => {
     setConfirmDialog({
       isOpen: true,
@@ -139,11 +197,13 @@ const AdminDashboard = ({ user, onLogout }) => {
   };
 
   const exportToCSV = () => {
-    const headers = ['Kode Unit', 'Nama', 'Telepon', 'Alamat', 'Keperluan', 'Waktu Kedatangan', 'Petugas', 'Status', 'Catatan'];
+    const headers = ['Kode Unit', 'Nama', 'Telepon', 'Email', 'NIK', 'Alamat', 'Keperluan', 'Waktu Kedatangan', 'Petugas', 'Status', 'Catatan'];
     const rows = complaints.map(c => [
       c.unit_code,
       c.nama_lengkap,
       c.nomor_telepon || '',
+      c.email || '',
+      c.nik || '',
       c.alamat || '',
       c.keperluan,
       c.waktu_kedatangan,
@@ -297,7 +357,7 @@ const AdminDashboard = ({ user, onLogout }) => {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-3">
-            Format: .xlsx, .xls, atau .csv. Maksimal 10MB. Baris kosong akan diabaikan otomatis.
+            Format: .xlsx, .xls, atau .csv. Maksimal 10MB. Sistem mendukung berbagai format kolom Excel (fleksibel). Baris kosong akan diabaikan otomatis.
           </p>
         </div>
 
@@ -311,6 +371,16 @@ const AdminDashboard = ({ user, onLogout }) => {
               </h2>
               
               <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                {/* ==================== PERUBAHAN: Tombol Tambah Data ==================== */}
+                <button
+                  onClick={() => setCreateMode(true)}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg flex items-center gap-2 transition-colors shadow-md whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  Tambah Data
+                </button>
+                {/* ==================== END PERUBAHAN ==================== */}
+
                 <div className="relative flex-1 sm:flex-initial">
                   <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
@@ -369,7 +439,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                 {searchTerm || statusFilter ? 'Tidak ada data yang sesuai' : 'Belum ada data'}
               </p>
               <p className="text-sm text-gray-500 mt-1">
-                {searchTerm || statusFilter ? 'Coba ubah filter pencarian' : 'Upload file Excel untuk menambahkan data'}
+                {searchTerm || statusFilter ? 'Coba ubah filter pencarian' : 'Upload file Excel atau tambah data manual'}
               </p>
             </div>
           ) : (
@@ -497,6 +567,170 @@ const AdminDashboard = ({ user, onLogout }) => {
         </div>
       </div>
 
+      {/* ==================== PERUBAHAN: Modal Create Data Baru ==================== */}
+      {createMode && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-scaleIn">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <h3 className="text-xl font-semibold flex items-center gap-2">
+                <Plus className="w-5 h-5 text-green-600" />
+                Tambah Data Pengaduan Baru
+              </h3>
+              <button 
+                onClick={() => setCreateMode(false)} 
+                className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 p-2 rounded-lg transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Nama Lengkap <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={newComplaint.nama_lengkap}
+                    onChange={(e) => setNewComplaint({...newComplaint, nama_lengkap: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="Masukkan nama lengkap"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">No Telepon</label>
+                  <input
+                    type="text"
+                    value={newComplaint.nomor_telepon}
+                    onChange={(e) => setNewComplaint({...newComplaint, nomor_telepon: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="08xxxxxxxxxx"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={newComplaint.email}
+                    onChange={(e) => setNewComplaint({...newComplaint, email: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="email@example.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">NIK</label>
+                  <input
+                    type="text"
+                    value={newComplaint.nik}
+                    onChange={(e) => setNewComplaint({...newComplaint, nik: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="16 digit NIK"
+                    maxLength="16"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">No Berkas</label>
+                  <input
+                    type="text"
+                    value={newComplaint.nomor_berkas}
+                    onChange={(e) => setNewComplaint({...newComplaint, nomor_berkas: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="Nomor berkas"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Alamat</label>
+                  <input
+                    type="text"
+                    value={newComplaint.alamat}
+                    onChange={(e) => setNewComplaint({...newComplaint, alamat: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="Alamat lengkap"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Keperluan</label>
+                <textarea
+                  value={newComplaint.keperluan}
+                  onChange={(e) => setNewComplaint({...newComplaint, keperluan: e.target.value})}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  placeholder="Jelaskan keperluan pengaduan"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Waktu Kedatangan</label>
+                  <input
+                    type="datetime-local"
+                    value={newComplaint.waktu_kedatangan}
+                    onChange={(e) => setNewComplaint({...newComplaint, waktu_kedatangan: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Petugas</label>
+                  <input
+                    type="text"
+                    value={newComplaint.petugas}
+                    onChange={(e) => setNewComplaint({...newComplaint, petugas: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                    placeholder="Nama petugas"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                  <select
+                    value={newComplaint.status}
+                    onChange={(e) => setNewComplaint({...newComplaint, status: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Proses">Proses</option>
+                    <option value="Selesai">Selesai</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Catatan</label>
+                <textarea
+                  value={newComplaint.catatan}
+                  onChange={(e) => setNewComplaint({...newComplaint, catatan: e.target.value})}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  placeholder="Catatan tambahan (opsional)"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleCreate}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition-colors"
+                >
+                  Simpan Data
+                </button>
+                <button
+                  onClick={() => setCreateMode(false)}
+                  className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-3 px-4 rounded-lg transition-colors"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ==================== END PERUBAHAN ==================== */}
+
       {/* Detail/Edit Modal */}
       {selectedComplaint && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn">
@@ -545,6 +779,27 @@ const AdminDashboard = ({ user, onLogout }) => {
                         type="text"
                         value={selectedComplaint.nomor_telepon}
                         onChange={(e) => setSelectedComplaint({...selectedComplaint, nomor_telepon: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                      <input
+                        type="email"
+                        value={selectedComplaint.email || ''}
+                        onChange={(e) => setSelectedComplaint({...selectedComplaint, email: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">NIK</label>
+                      <input
+                        type="text"
+                        value={selectedComplaint.nik || ''}
+                        onChange={(e) => setSelectedComplaint({...selectedComplaint, nik: e.target.value})}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
                       />
                     </div>
@@ -632,6 +887,17 @@ const AdminDashboard = ({ user, onLogout }) => {
                     <div className="bg-gray-50 p-4 rounded-lg">
                       <p className="text-sm text-gray-500 mb-1">Telepon</p>
                       <p className="font-semibold">{selectedComplaint.nomor_telepon || '-'}</p>
+                    </div>
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Email</p>
+                      <p className="font-semibold">{selectedComplaint.email || '-'}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">NIK</p>
+                      <p className="font-semibold">{selectedComplaint.nik || '-'}</p>
                     </div>
                     <div className="bg-gray-50 p-4 rounded-lg">
                       <p className="text-sm text-gray-500 mb-1">Alamat</p>

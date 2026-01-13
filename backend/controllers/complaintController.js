@@ -2,6 +2,63 @@
 const db = require('../config/database');
 const XLSX = require('xlsx');
 
+// ==================== PERUBAHAN 1: Generator Kode Unit Acak ====================
+// Generate random unique unit code
+const generateUniqueUnitCode = async () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let isUnique = false;
+  let unitCode = '';
+
+  while (!isUnique) {
+    // Generate KPU + 6 random characters (e.g., KPU-A3X9K2)
+    unitCode = 'KPU-';
+    for (let i = 0; i < 6; i++) {
+      unitCode += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    // Check if exists in database
+    const [existing] = await db.query(
+      'SELECT id FROM complaints WHERE unit_code = ?',
+      [unitCode]
+    );
+
+    if (existing.length === 0) {
+      isUnique = true;
+    }
+  }
+
+  return unitCode;
+};
+// ==================== END PERUBAHAN 1 ====================
+const detectHeaderRow = (sheet) => {
+  const range = XLSX.utils.decode_range(sheet['!ref']);
+
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    const row = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      range: r,
+      blankrows: false
+    })[0];
+
+    if (!row) continue;
+
+    const normalized = row.map(v =>
+      String(v || '').toLowerCase()
+    );
+
+    if (
+      normalized.includes('nama') ||
+      normalized.includes('nama lengkap') ||
+      normalized.includes('ringkasan pengaduan') ||
+      normalized.includes('pengaduan')
+    ) {
+      return r;
+    }
+  }
+  return null;
+};
+
+
 // Helper function to check if row is empty
 const isEmptyRow = (row) => {
   if (!row) return true;
@@ -18,9 +75,109 @@ const isEmptyRow = (row) => {
 const hasEssentialData = (row) => {
   return (
     (row.nama_lengkap && row.nama_lengkap.toString().trim()) ||
-    (row.unit_code && row.unit_code.toString().trim())
+    (row.nama && row.nama.toString().trim())
   );
 };
+
+// ==================== PERUBAHAN 3: Flexible Column Mapping ====================
+// Flexible column mapper - support berbagai format Excel
+const mapExcelColumns = (row) => {
+  const normalizedRow = {};
+  
+  // Normalize all column names
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = key.toLowerCase().trim()
+      .replace(/\s+/g, '_')      // Spasi → underscore
+      .replace(/\./g, '_')        // Titik → underscore (No.HP → no_hp)
+      .replace(/[^\w]/g, '_');    // Karakter special → underscore
+    normalizedRow[normalizedKey] = value;
+  }
+
+  const isChecked = (value) => {
+  if (value === undefined || value === null) return false;
+
+  const v = String(value).toLowerCase().trim();
+  return (
+    v === 'true' ||
+    v === '1' ||
+    v === '✓' ||
+    v === 'ya' ||
+    v === 'yes'
+  );
+  };
+
+
+  const normalizeTextStatus = (rawStatus) => {
+  if (!rawStatus) return null;
+
+  const key = String(rawStatus)
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '_');
+
+  const map = {
+    pending: 'Pending',
+    proses: 'Diproses',
+    diproses: 'Diproses',
+    on_progress: 'Diproses',
+    selesai: 'Selesai',
+    done: 'Selesai'
+  };
+
+  return map[key] || null;
+  };
+
+
+  const resolveStatus = (row) => {
+  let hasSelesai = false;
+  let hasProses = false;
+
+  for (const [key, value] of Object.entries(row)) {
+    if (value === true) {
+      if (String(key).toLowerCase().includes('selesai')) {
+        hasSelesai = true;
+      } else if (String(key).toLowerCase().includes('proses')) {
+        hasProses = true;
+      }
+    }
+  }
+
+  if (hasSelesai) return 'Selesai';
+  if (hasProses) return 'Diproses';
+
+  if (row.status) {
+    return normalizeTextStatus(row.status);
+  }
+
+  return 'Pending';
+};
+
+
+  // Mapping with multiple possible column names
+  return {
+    nama_lengkap: normalizedRow.nama_lengkap || normalizedRow.nama || normalizedRow.nama_pengadu || '',
+    nomor_telepon: normalizedRow.nomor_telepon || normalizedRow.no_telp || 
+                   normalizedRow.telepon || normalizedRow.no_hp || 
+                   normalizedRow.no_telepon || '',
+    nomor_berkas: normalizedRow.nomor_berkas || normalizedRow.no_berkas || 
+                  normalizedRow.berkas || '',
+    alamat: normalizedRow.alamat || normalizedRow.address || normalizedRow.alamat_pengadu || '',
+    keperluan: normalizedRow.keperluan || normalizedRow.jenis_pengaduan || 
+               normalizedRow.pengaduan || normalizedRow.masalah || normalizedRow.ringkasan_pengaduan || '',
+    waktu_kedatangan: normalizedRow.waktu_kedatangan || normalizedRow.tanggal || normalizedRow.tanggal_pengaduan ||
+                      normalizedRow.tanggal_datang || normalizedRow.waktu || 
+                      new Date().toISOString(),
+    catatan: normalizedRow.catatan || normalizedRow.keterangan || 
+             normalizedRow.note || normalizedRow.notes || '',
+    petugas: normalizedRow.petugas || normalizedRow.officer || 
+             normalizedRow.nama_petugas || normalizedRow.petugas_penerima || '',
+    status: resolveStatus(normalizedRow),
+    // NEW FIELDS - Support kolom baru
+    email: normalizedRow.email || normalizedRow.email_address || normalizedRow.e_mail || '',
+    nik: normalizedRow.nik || normalizedRow.no_ktp || normalizedRow.nomor_ktp || ''
+  };
+};
+// ==================== END PERUBAHAN 3 ====================
 
 // Get complaint by unit code (public)
 exports.getByUnitCode = async (req, res) => {
@@ -63,9 +220,9 @@ exports.getAll = async (req, res) => {
 
     // Search filter
     if (search) {
-      query += ' AND (nama_lengkap LIKE ? OR unit_code LIKE ? OR keperluan LIKE ? OR petugas LIKE ?)';
+      query += ' AND (nama_lengkap LIKE ? OR unit_code LIKE ? OR keperluan LIKE ? OR petugas LIKE ? OR email LIKE ? OR nik LIKE ?)';
       const searchParam = `%${search}%`;
-      params.push(searchParam, searchParam, searchParam, searchParam);
+      params.push(searchParam, searchParam, searchParam, searchParam, searchParam, searchParam);
     }
 
     // Status filter
@@ -130,7 +287,64 @@ exports.getStatistics = async (req, res) => {
   }
 };
 
-// Upload Excel file with empty row filtering
+// ==================== PERUBAHAN 2: Create Manual Endpoint ====================
+// Create new complaint manually
+exports.create = async (req, res) => {
+  try {
+    const complaintData = req.body;
+
+    // Validate required fields
+    if (!complaintData.nama_lengkap) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Nama lengkap wajib diisi' 
+      });
+    }
+
+    // Generate unique unit code
+    const unitCode = await generateUniqueUnitCode();
+
+    // Insert to database
+    const [result] = await db.query(
+      `INSERT INTO complaints 
+        (unit_code, nama_lengkap, nomor_telepon, nomor_berkas, alamat, 
+         keperluan, waktu_kedatangan, catatan, petugas, status, email, nik)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        unitCode,
+        complaintData.nama_lengkap,
+        complaintData.nomor_telepon || '',
+        complaintData.nomor_berkas || '',
+        complaintData.alamat || '',
+        complaintData.keperluan || '',
+        complaintData.waktu_kedatangan || new Date().toISOString(),
+        complaintData.catatan || '',
+        complaintData.petugas || '',
+        complaintData.status || 'Pending',
+        complaintData.email || '',
+        complaintData.nik || ''
+      ]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Data berhasil ditambahkan',
+      data: {
+        id: result.insertId,
+        unit_code: unitCode
+      }
+    });
+  } catch (error) {
+    console.error('Create error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Terjadi kesalahan: ' + error.message 
+    });
+  }
+};
+// ==================== END PERUBAHAN 2 ====================
+
+// Upload Excel file with flexible column mapping
 exports.uploadExcel = async (req, res) => {
   try {
     if (!req.file) {
@@ -146,36 +360,57 @@ exports.uploadExcel = async (req, res) => {
     const sheet = workbook.Sheets[sheetName];
     
     // Convert to JSON
-    const rawData = XLSX.utils.sheet_to_json(sheet, { 
-      defval: null,
-      raw: false 
-    });
+    const headerRow = detectHeaderRow(sheet);
+
+let rawData;
+
+if (headerRow !== null) {
+  // Excel PAKAI HEADER (walaupun di baris ke-3)
+  rawData = XLSX.utils.sheet_to_json(sheet, {
+    defval: null,
+    raw: false,
+    range: headerRow
+  });
+} else {
+  // Excel TANPA HEADER (format lama)
+  rawData = XLSX.utils.sheet_to_json(sheet, {
+    defval: null,
+    raw: false,
+    header: [
+      'nama_lengkap',
+      'nomor_telepon',
+      'keperluan',
+      'status',
+      'petugas',
+      'catatan'
+    ]
+  });
+}
+
 
     console.log(`📊 Total rows from Excel: ${rawData.length}`);
 
-    // Filter out empty rows and rows without essential data
-    const validData = rawData.filter((row, index) => {
-      // Normalize column names
-      const normalizedRow = {};
-      for (const [key, value] of Object.entries(row)) {
-        const normalizedKey = key.toLowerCase().trim().replace(/\s+/g, '_');
-        normalizedRow[normalizedKey] = value;
-      }
-
+    // Filter out empty rows and map columns
+    const validData = [];
+    
+    for (const [index, row] of rawData.entries()) {
       // Check if empty
-      if (isEmptyRow(normalizedRow)) {
+      if (isEmptyRow(row)) {
         console.log(`⏭️  Row ${index + 2} is empty, skipping...`);
-        return false;
+        continue;
       }
+      
+      // Map columns flexibly
+      const mappedData = mapExcelColumns(row);
       
       // Check if has essential data
-      if (!hasEssentialData(normalizedRow)) {
+      if (!hasEssentialData(mappedData)) {
         console.log(`⚠️  Row ${index + 2} lacks essential data, skipping...`);
-        return false;
+        continue;
       }
       
-      return true;
-    });
+      validData.push(mappedData);
+    }
 
     console.log(`✅ Valid rows: ${validData.length}`);
     console.log(`🚫 Skipped: ${rawData.length - validData.length} empty rows`);
@@ -184,79 +419,67 @@ exports.uploadExcel = async (req, res) => {
     let updated = 0;
     let errors = [];
 
-    for (const [index, row] of validData.entries()) {
+    for (const [index, complaintData] of validData.entries()) {
       try {
-        // Normalize column names
-        const normalizedRow = {};
-        for (const [key, value] of Object.entries(row)) {
-          const normalizedKey = key.toLowerCase().trim().replace(/\s+/g, '_');
-          normalizedRow[normalizedKey] = value;
-        }
+        // Generate unique unit code for new entries
+        let unitCode = await generateUniqueUnitCode();
 
-        // Map to database fields
-        const complaintData = {
-          no: normalizedRow.no || normalizedRow.nomor || index + 1,
-          unit_code: normalizedRow.unit_code || normalizedRow.kode_unit || `KPU${String(index + 1).padStart(3, '0')}`,
-          nama_lengkap: normalizedRow.nama_lengkap || normalizedRow.nama || '',
-          nomor_telepon: normalizedRow.nomor_telepon || normalizedRow.no_telp || normalizedRow.telepon || '',
-          nomor_berkas: normalizedRow.nomor_berkas || normalizedRow.no_berkas || '',
-          alamat: normalizedRow.alamat || '',
-          keperluan: normalizedRow.keperluan || '',
-          waktu_kedatangan: normalizedRow.waktu_kedatangan || normalizedRow.tanggal || new Date().toISOString(),
-          catatan: normalizedRow.catatan || normalizedRow.keterangan || '',
-          petugas: normalizedRow.petugas || '',
-          status: normalizedRow.status || 'Pending'
-        };
-
-        // Validate required fields
-        if (!complaintData.nama_lengkap) {
-          errors.push({ row: index + 2, error: 'Missing nama_lengkap' });
-          continue;
-        }
-
-        // Check if exists
+        // Check if exists by name and phone (since unit_code is now random)
         const [existing] = await db.query(
-          'SELECT id FROM complaints WHERE unit_code = ?',
-          [complaintData.unit_code]
+          'SELECT id, unit_code FROM complaints WHERE nama_lengkap = ? AND nomor_telepon = ?',
+          [complaintData.nama_lengkap, complaintData.nomor_telepon]
         );
 
         if (existing.length > 0) {
-          // Update
+          // Update existing
+          unitCode = existing[0].unit_code; // Keep existing unit code
           await db.query(
             `UPDATE complaints SET 
-              no = ?, nama_lengkap = ?, nomor_telepon = ?, nomor_berkas = ?,
+              nama_lengkap = ?, nomor_telepon = ?, nomor_berkas = ?,
               alamat = ?, keperluan = ?, waktu_kedatangan = ?, catatan = ?,
-              petugas = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+              petugas = ?, status = ?, email = ?, nik = ?, updated_at = CURRENT_TIMESTAMP
             WHERE unit_code = ?`,
             [
-              complaintData.no, complaintData.nama_lengkap, 
-              complaintData.nomor_telepon, complaintData.nomor_berkas,
-              complaintData.alamat, complaintData.keperluan, 
-              complaintData.waktu_kedatangan, complaintData.catatan,
-              complaintData.petugas, complaintData.status, 
-              complaintData.unit_code
+              complaintData.nama_lengkap, 
+              complaintData.nomor_telepon, 
+              complaintData.nomor_berkas,
+              complaintData.alamat, 
+              complaintData.keperluan, 
+              complaintData.waktu_kedatangan, 
+              complaintData.catatan,
+              complaintData.petugas, 
+              complaintData.status,
+              complaintData.email,
+              complaintData.nik,
+              unitCode
             ]
           );
           updated++;
-          console.log(`🔄 Updated: ${complaintData.unit_code}`);
+          console.log(`🔄 Updated: ${unitCode}`);
         } else {
-          // Insert
+          // Insert new
           await db.query(
             `INSERT INTO complaints 
-              (unit_code, no, nama_lengkap, nomor_telepon, nomor_berkas, alamat, 
-               keperluan, waktu_kedatangan, catatan, petugas, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (unit_code, nama_lengkap, nomor_telepon, nomor_berkas, alamat, 
+               keperluan, waktu_kedatangan, catatan, petugas, status, email, nik)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              complaintData.unit_code, complaintData.no, 
-              complaintData.nama_lengkap, complaintData.nomor_telepon, 
-              complaintData.nomor_berkas, complaintData.alamat, 
-              complaintData.keperluan, complaintData.waktu_kedatangan, 
-              complaintData.catatan, complaintData.petugas, 
-              complaintData.status
+              unitCode,
+              complaintData.nama_lengkap, 
+              complaintData.nomor_telepon, 
+              complaintData.nomor_berkas, 
+              complaintData.alamat, 
+              complaintData.keperluan, 
+              complaintData.waktu_kedatangan, 
+              complaintData.catatan, 
+              complaintData.petugas, 
+              complaintData.status,
+              complaintData.email,
+              complaintData.nik
             ]
           );
           inserted++;
-          console.log(`➕ Inserted: ${complaintData.unit_code}`);
+          console.log(`➕ Inserted: ${unitCode}`);
         }
       } catch (error) {
         console.error(`❌ Error row ${index + 2}:`, error);

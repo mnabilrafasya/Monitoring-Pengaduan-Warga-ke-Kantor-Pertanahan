@@ -49,6 +49,11 @@ export const complaintAPI = {
   checkByUnitCode: (unitCode) => api.get(`/complaints/check/${unitCode}`),
   getAll: (params) => api.get('/complaints', { params }),
   getStatistics: () => api.get('/complaints/statistics'),
+  
+  // ==================== PERUBAHAN: Tambah create function ====================
+  create: (data) => api.post('/complaints', data), // NEW: Create manual
+  // ==================== END PERUBAHAN ====================
+  
   uploadExcel: (file) => {
     const formData = new FormData();
     formData.append('file', file);
