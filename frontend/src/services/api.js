@@ -50,9 +50,7 @@ export const complaintAPI = {
   getAll: (params) => api.get('/complaints', { params }),
   getStatistics: () => api.get('/complaints/statistics'),
   
-  // ==================== PERUBAHAN: Tambah create function ====================
-  create: (data) => api.post('/complaints', data), // NEW: Create manual
-  // ==================== END PERUBAHAN ====================
+  create: (data) => api.post('/complaints', data), 
   
   uploadExcel: (file) => {
     const formData = new FormData();

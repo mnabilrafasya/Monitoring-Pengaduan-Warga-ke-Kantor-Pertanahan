@@ -20,7 +20,6 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [selectedComplaint, setSelectedComplaint] = useState(null);
   const [editMode, setEditMode] = useState(false);
   
-  // ==================== PERUBAHAN: State untuk Create Mode ====================
   const [createMode, setCreateMode] = useState(false);
   const [newComplaint, setNewComplaint] = useState({
     nama_lengkap: '',
@@ -35,7 +34,6 @@ const AdminDashboard = ({ user, onLogout }) => {
     status: 'Pending',
     catatan: ''
   });
-  // ==================== END PERUBAHAN ====================
 
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, onConfirm: null, title: '', message: '' });
 
@@ -116,7 +114,6 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
-  // ==================== PERUBAHAN: Handler Create Manual ====================
   const handleCreate = async () => {
     // Validasi
     if (!newComplaint.nama_lengkap.trim()) {
@@ -154,7 +151,6 @@ const AdminDashboard = ({ user, onLogout }) => {
       addToast(error.response?.data?.message || 'Gagal menambahkan data', 'error');
     }
   };
-  // ==================== END PERUBAHAN ====================
 
   const handleDelete = (id) => {
     setConfirmDialog({
@@ -371,7 +367,6 @@ const AdminDashboard = ({ user, onLogout }) => {
               </h2>
               
               <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-                {/* ==================== PERUBAHAN: Tombol Tambah Data ==================== */}
                 <button
                   onClick={() => setCreateMode(true)}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg flex items-center gap-2 transition-colors shadow-md whitespace-nowrap"
@@ -379,7 +374,6 @@ const AdminDashboard = ({ user, onLogout }) => {
                   <Plus className="w-4 h-4" />
                   Tambah Data
                 </button>
-                {/* ==================== END PERUBAHAN ==================== */}
 
                 <div className="relative flex-1 sm:flex-initial">
                   <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -579,7 +573,6 @@ const AdminDashboard = ({ user, onLogout }) => {
         </div>
       </div>
 
-      {/* ==================== PERUBAHAN: Modal Create Data Baru ==================== */}
       {createMode && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 animate-fadeIn">
           <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-scaleIn">
@@ -741,7 +734,6 @@ const AdminDashboard = ({ user, onLogout }) => {
           </div>
         </div>
       )}
-      {/* ==================== END PERUBAHAN ==================== */}
 
       {/* Detail/Edit Modal */}
       {selectedComplaint && (

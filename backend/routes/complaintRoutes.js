@@ -31,9 +31,7 @@ router.get('/check/:unitCode', complaintController.getByUnitCode);
 router.get('/', authMiddleware, complaintController.getAll);
 router.get('/statistics', authMiddleware, complaintController.getStatistics);
 
-// ==================== PERUBAHAN: Tambah route create manual ====================
 router.post('/', authMiddleware, complaintController.create); // NEW: Create manual
-// ==================== END PERUBAHAN ====================
 
 router.post('/upload', authMiddleware, upload.single('file'), complaintController.uploadExcel);
 router.put('/:id', authMiddleware, complaintController.update);

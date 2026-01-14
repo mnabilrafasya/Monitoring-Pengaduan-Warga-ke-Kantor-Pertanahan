@@ -141,23 +141,6 @@ const mapExcelColumns = (row) => {
     normalizedRow[normalizedKey] = value;
   }
 
-  // ============ CEK TRUE/1/1.0 untuk Status ============
-  const isChecked = (value) => {
-    if (value === undefined || value === null) return false;
-    if (value === true || value === "TRUE") return true;
-    if (value === 1 || value === 1.0) return true;
-
-    const v = String(value).toLowerCase().trim();
-    return (
-      v === "true" ||
-      v === "1" ||
-      v === "1.0" ||
-      v === "✓" ||
-      v === "ya" ||
-      v === "yes"
-    );
-  };
-
   // ============ RESOLVE STATUS ============
   const resolveStatus = (row) => {
     let hasSelesai = false;
@@ -174,8 +157,7 @@ const mapExcelColumns = (row) => {
         .replace(/_+/g, "_")
         .replace(/^_|_$/g, "");
 
-      if (isChecked(value)) {
-        // Cek berbagai variasi "selesai"
+
         if (
           normalizedKey.includes("selesai") ||
           normalizedKey === "status_selesai" ||
@@ -191,7 +173,7 @@ const mapExcelColumns = (row) => {
         ) {
           hasProses = true;
         }
-      }
+      
     }
 
     // Prioritas: Selesai > Proses > Pending
@@ -505,11 +487,6 @@ exports.uploadExcel = async (req, res) => {
           })[0]
         : null;
 
-    // ============ FIX: DETEKSI MULTI-ROW HEADER LEBIH AKURAT ============
-    // Multi-row header HANYA jika:
-    // 1. Ada baris kedua
-    // 2. Baris kedua HANYA punya "Selesai"/"Proses" (bukan data lain)
-    // 3. Kolom lain di baris kedua kosong atau "-"
     let hasMultiRowHeader = false;
 
     if (secondHeaderRow) {
