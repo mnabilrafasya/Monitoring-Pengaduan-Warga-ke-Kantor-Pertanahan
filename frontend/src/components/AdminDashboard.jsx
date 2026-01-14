@@ -1,6 +1,6 @@
 // frontend/src/components/AdminDashboard.jsx
 import React, { useState, useEffect } from 'react';
-import { Search, Upload, FileText, CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, Eye, Edit, Trash2, X, Download, Plus } from 'lucide-react';
+import { Search, Upload, FileText, CheckCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, Eye, Edit, Trash2, X, Download, Plus, Mail, CreditCard } from 'lucide-react';
 import { complaintAPI } from '../services/api';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast, ToastContainer } from './Toast';
@@ -469,6 +469,18 @@ const AdminDashboard = ({ user, onLogout }) => {
                           <div className="text-sm text-gray-500 flex items-center gap-1">
                             <span>📞</span> {item.nomor_telepon || '-'}
                           </div>
+                          {item.nik && (
+                            <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                              <CreditCard className="w-3 h-3" />
+                              {item.nik}
+                            </div>
+                          )}
+                          {item.email && (
+                            <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                              <Mail className="w-3 h-3" />
+                              {item.email}
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-gray-900 max-w-xs truncate" title={item.keperluan}>

@@ -1,6 +1,6 @@
 // frontend/src/components/PublicView.jsx
 import React, { useState } from 'react';
-import { Search, FileText, CheckCircle, Clock, AlertCircle, Info, Phone, MapPin, Calendar, User } from 'lucide-react';
+import { Search, FileText, CheckCircle, Clock, AlertCircle, Info, Phone, MapPin, Calendar, User, Mail, CreditCard } from 'lucide-react';
 import { complaintAPI } from '../services/api';
 
 const PublicView = ({ onNavigate }) => {
@@ -58,9 +58,14 @@ const PublicView = ({ onNavigate }) => {
       <div className="bg-gradient-to-r from-green-600 to-green-700 text-white py-12 shadow-lg">
         <div className="container mx-auto px-4">
           <div className="text-center">
-            <div className="inline-block p-4 bg-white bg-opacity-20 rounded-2xl mb-4 backdrop-blur-sm">
-              <FileText className="w-16 h-16 text-white" />
+            <div className="inline-flex items-center justify-center mb-4">
+              <img
+                src="/logo_bpn.png"
+                alt="Logo BPN"
+                className="h-16 md:h-36 lg:h-40 w-auto object-contain"
+              />
             </div>
+
             <h1 className="text-4xl md:text-5xl font-bold mb-3">
               Sistem Monitoring Pengaduan
             </h1>
@@ -103,7 +108,7 @@ const PublicView = ({ onNavigate }) => {
                           setError('');
                         }}
                         onKeyPress={(e) => e.key === 'Enter' && handleCheckStatus()}
-                        placeholder="Contoh: KPU001"
+                        placeholder="Contoh: KPU-000PP"
                         className="w-full px-5 py-4 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-lg font-semibold tracking-wide transition-all"
                       />
                       <Search className="w-6 h-6 text-gray-400 absolute right-4 top-1/2 -translate-y-1/2" />
@@ -246,6 +251,26 @@ const PublicView = ({ onNavigate }) => {
                       <p className="font-semibold text-gray-800">{complaint.nomor_berkas || '-'}</p>
                     </div>
                   </div>
+                  {complaint.email && (
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1 flex items-center gap-1">
+                        <Mail className="w-3 h-3" />
+                        Email
+                      </p>
+                      <p className="font-semibold text-gray-800">{complaint.email}</p>
+                    </div>
+                  )}
+
+                  {complaint.nik && (
+                    <div>
+                      <p className="text-sm text-gray-500 mb-1 flex items-center gap-1">
+                        <CreditCard className="w-3 h-3" />
+                        NIK
+                      </p>
+                      <p className="font-semibold text-gray-800 font-mono">{complaint.nik}</p>
+                    </div>
+                  )}
+
 
                   <div>
                     <p className="text-sm text-gray-500 mb-1 flex items-center gap-1">
@@ -311,15 +336,6 @@ const PublicView = ({ onNavigate }) => {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Footer */}
-      <div className="bg-gray-800 text-white py-8 mt-16">
-        <div className="container mx-auto px-4 text-center">
-          <p className="text-gray-300">
-            © 2024 Kantor Pertanahan Kota Palembang. All rights reserved.
-          </p>
-        </div>
       </div>
     </div>
   );
