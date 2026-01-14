@@ -671,6 +671,15 @@ exports.uploadExcel = async (req, res) => {
         header: mergedHeader,
         range: dataStartRow,
       });
+    }else {
+    // ============ FORMAT NORMAL (SINGLE HEADER) ============
+      console.log("📊 Detected: NORMAL format (single-row header)");
+
+        rawData = XLSX.utils.sheet_to_json(sheet, {
+        defval: null,
+        raw: false,
+        range: headerRow
+      });
     }
 
     console.log(`📊 Total rows: ${rawData.length}`);
